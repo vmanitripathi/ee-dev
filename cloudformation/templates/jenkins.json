@@ -1,0 +1,122 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "This template imports subnet fromm vpc template and installs jenkins & chef",
+    "Parameters": {
+        "InstanceName": {
+            "Type": "String",
+            "Default" : "Jenkins",
+            "Description": "Name of the Instance"
+        },
+        "ImageId": {
+            "Type": "String",
+            "Default" : "ami-0653e888ec96eab9b",
+            "Description": "Value of the AMI ID to be used for launching instance. The default value is ubuntu 16.04 ohio region."
+        },
+        "KeyPairName": {
+            "Type": "String",
+            "Default" : "dev-jenkins",
+            "Description": "Name of the Key pair to be used. This needs to be created from AWS Console as CFT doesn't provide resource for it"
+        },
+        "InstanceType": {
+            "Type": "String",
+            "Default" : "t2.micro",
+            "Description": "Instance type to be used for launching instance"
+        },
+        "ImportStack":{
+            "Type": "String",
+            "Default" : "dev",
+            "Description": "Stack to be used for importing Network IDS"
+        },
+        "Region":{
+            "Type": "String",
+            "Default" : "us-east-2",
+            "Description": "Region to be used"
+        }
+    },
+    "Resources": {
+        "SecurityGroup":{
+            "Type" : "AWS::EC2::SecurityGroup",
+            "Properties" : {
+               "GroupName" : "Public-EC2-Jenkins-SG",
+               "GroupDescription" : "Alllows traffic on port 8080 and 22 from everywhere ",
+               "SecurityGroupIngress" : [  
+                   {
+                        "IpProtocol" : "tcp",
+                        "FromPort" : 22,
+                        "ToPort" : 22,
+                        "CidrIp" : "0.0.0.0/0"
+                    },
+                    {
+                        "IpProtocol" : "tcp",
+                        "FromPort" : 8080,
+                        "ToPort" : 8080,
+                        "CidrIp" : "0.0.0.0/0"
+                    } 
+                ],
+               "Tags" :  [ {
+                "Key" : "Name",
+                "Value" : "Public-EC2-Jenkins-SG"
+              }],
+               "VpcId" : {
+                    "Fn::ImportValue": {
+                        "Fn::Sub": "${ImportStack}-VPC"
+                    }
+                }
+            }
+          },    
+        "Ec2Instance":{
+            "Type" : "AWS::EC2::Instance",
+            "Properties" : {
+               "AvailabilityZone" : { "Fn::Select": [ "0", { "Fn::GetAZs": { "Ref": "Region" }}]},
+               "ImageId" : { "Ref": "ImageId" },
+               "InstanceType" : { "Ref": "InstanceType" },
+               "KeyName" : {"Ref":"KeyPairName"},
+               "SecurityGroupIds" : [{
+                    "Fn::GetAtt": [
+                        "SecurityGroup",
+                        "GroupId"
+                    ]
+                } ],
+               "SubnetId" : {
+                    "Fn::ImportValue": {
+                        "Fn::Sub": "${ImportStack}-PublicSubnet"
+                    }
+                },
+                "UserData": {
+                    "Fn::Base64": {
+                      "Fn::Join": [
+                        "",
+                        [
+                            "#!/bin/bash -xe\n",
+                            "sudo apt-get update\n",
+                            "sudo apt-get install -y python-software-properties debconf-utils\n",
+                            "sudo add-apt-repository -y ppa:webupd8team/java\n",
+                            "wget -q -O - https://pkg.jenkins.io/debian/jenkins-ci.org.key | sudo apt-key add -\n",
+                            "echo deb https://pkg.jenkins.io/debian-stable binary/ | sudo tee /etc/apt/sources.list.d/jenkins.list\n",
+                            "sudo apt-get update\n",
+                            "echo 'oracle-java8-installer shared/accepted-oracle-license-v1-1 select true' | sudo debconf-set-selections\n",
+                            "sudo apt-get install -y oracle-java8-installer\n",
+                            "sudo apt-get -y install jenkins\n",
+                            "sudo systemctl start jenkins\n",
+                            "curl https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chefdk -c stable"
+                        ]
+                      ]
+                    }
+                  },
+               "Tags" : [ {"Key":"Name","Value":{ "Ref": "InstanceName" }} ]
+            }
+        },
+        "ElasticIP": {
+            "Type": "AWS::EC2::EIP",
+            "Properties": {
+                "Domain": {
+                    "Fn::ImportValue": {
+                        "Fn::Sub": "${ImportStack}-VPC"
+                    }
+                },
+                "InstanceId": {"Ref":"Ec2Instance"}
+            }
+        }
+
+    }
+}
