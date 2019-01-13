@@ -1,11 +1,16 @@
 {
     "AWSTemplateFormatVersion": "2010-09-09",
-    "Description": "This template imports subnet fromm vpc template and installs jenkins & chef",
+    "Description": "This template imports subnet from vpc template and installs jenkins, chef and deployment server",
     "Parameters": {
-        "InstanceName": {
+        "PublicInstanceName": {
             "Type": "String",
             "Default" : "Jenkins",
-            "Description": "Name of the Instance"
+            "Description": "Name of the Public Instance"
+        },
+        "PrivateInstanceName": {
+            "Type": "String",
+            "Default" : "DeploymentServer",
+            "Description": "Name of the Private Instance"
         },
         "ImageId": {
             "Type": "String",
@@ -34,7 +39,7 @@
         }
     },
     "Resources": {
-        "SecurityGroup":{
+        "PublicInstanceSecurityGroup":{
             "Type" : "AWS::EC2::SecurityGroup",
             "Properties" : {
                "GroupName" : "Public-EC2-Jenkins-SG",
@@ -63,8 +68,35 @@
                     }
                 }
             }
-          },    
-        "Ec2Instance":{
+        },
+        "PrivateInstanceSecurityGroup":{
+            "Type" : "AWS::EC2::SecurityGroup",
+            "Properties" : {
+               "GroupName" : "Private-EC2-DeploymentSever-SG",
+               "GroupDescription" : "Allows all traffic from jekins security group",
+               "SecurityGroupIngress" : [  
+                   {
+                        "IpProtocol" : "-1",
+                        "SourceSecurityGroupId" : {
+                            "Fn::GetAtt": [
+                                "PublicInstanceSecurityGroup",
+                                "GroupId"
+                            ]
+                        }
+                    } 
+                ],
+               "Tags" :  [ {
+                "Key" : "Name",
+                "Value" : "Private-EC2-DeploymentSever-SG"
+              }],
+               "VpcId" : {
+                    "Fn::ImportValue": {
+                        "Fn::Sub": "${ImportStack}-VPC"
+                    }
+                }
+            }
+        },
+        "PublicEc2Instance":{
             "Type" : "AWS::EC2::Instance",
             "Properties" : {
                "AvailabilityZone" : { "Fn::Select": [ "0", { "Fn::GetAZs": { "Ref": "Region" }}]},
@@ -73,7 +105,7 @@
                "KeyName" : {"Ref":"KeyPairName"},
                "SecurityGroupIds" : [{
                     "Fn::GetAtt": [
-                        "SecurityGroup",
+                        "PublicInstanceSecurityGroup",
                         "GroupId"
                     ]
                 } ],
@@ -103,7 +135,7 @@
                       ]
                     }
                   },
-               "Tags" : [ {"Key":"Name","Value":{ "Ref": "InstanceName" }} ]
+               "Tags" : [ {"Key":"Name","Value":{ "Ref": "PublicInstanceName" }} ]
             }
         },
         "ElasticIP": {
@@ -114,7 +146,46 @@
                         "Fn::Sub": "${ImportStack}-VPC"
                     }
                 },
-                "InstanceId": {"Ref":"Ec2Instance"}
+                "InstanceId": {"Ref":"PublicEc2Instance"}
+            }
+        },
+        "PrivateEc2Instance":{
+            "Type" : "AWS::EC2::Instance",
+            "Properties" : {
+               "AvailabilityZone" : { "Fn::Select": [ "0", { "Fn::GetAZs": { "Ref": "Region" }}]},
+               "ImageId" : { "Ref": "ImageId" },
+               "InstanceType" : { "Ref": "InstanceType" },
+               "KeyName" : {"Ref":"KeyPairName"},
+               "SecurityGroupIds" : [{
+                    "Fn::GetAtt": [
+                        "PrivateInstanceSecurityGroup",
+                        "GroupId"
+                    ]
+                } ],
+               "SubnetId" : {
+                    "Fn::ImportValue": {
+                        "Fn::Sub": "${ImportStack}-PrivateSubnet"
+                    }
+                },
+                "UserData": {
+                    "Fn::Base64": {
+                      "Fn::Join": [
+                        "",
+                        [
+                            "#!/bin/bash -xe\n",
+                            "sudo apt-get update\n",
+                            "sudo apt-get install -y python-software-properties debconf-utils\n",
+                            "sudo add-apt-repository -y ppa:webupd8team/java\n",
+                            "sudo apt-get update\n",
+                            "echo 'oracle-java8-installer shared/accepted-oracle-license-v1-1 select true' | sudo debconf-set-selections\n",
+                            "sudo apt-get install -y oracle-java8-installer\n",
+                            "sudo apt install -y  docker.io\n",
+                            "sudo apt-get install -y tomcat8 tomcat8-docs tomcat8-admin tomcat8-examples"
+                        ]
+                      ]
+                    }
+                  },
+               "Tags" : [ {"Key":"Name","Value":{ "Ref": "PrivateInstanceName" }} ]
             }
         }
 
